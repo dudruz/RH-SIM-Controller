@@ -1,0 +1,60 @@
+/* RH Sim — auth.css  (estilos da tela de login)
+   Carregar APÓS style.css. Usa as variáveis já definidas lá. */
+
+/* esconde o layout do sistema enquanto o login está ativo */
+body.login-mode .sidebar,
+body.login-mode .main-wrapper { display: none !important; }
+
+#loginOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sidebar);          /* azul-escuro do sistema */
+  padding: 20px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 32px 28px;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.login-brand-icon {
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--primary);
+  color: #fff;
+  border-radius: var(--radius);
+  font-size: 22px;
+}
+.login-brand-name { font-weight: 700; font-size: 18px; color: var(--text); line-height: 1.1; }
+.login-brand-sub  { font-size: 12px; color: var(--text-secondary); }
+
+.login-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 18px;
+}
+
+.login-field { margin-bottom: 14px; }
+.login-field .form-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
+
+.login-error {
+  color: var(--danger);
+  font-size: 13px;
+  min-height: 18px;
+  margin-bottom: 8px;
+}
