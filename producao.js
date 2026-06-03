@@ -158,8 +158,14 @@ const Producao = {
               </div>
               <div class="col-md-4">
                 <label class="form-label">Projeto</label>
-                <select class="form-select" id="prodProjeto">
+                <select class="form-select" id="prodProjeto" onchange="Producao._fillArtes()">
                   <option value="">Selecione...</option>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Arte <span class="text-secondary" style="font-weight:400">(opcional)</span></label>
+                <select class="form-select" id="prodArte">
+                  <option value="">— nenhuma —</option>
                 </select>
               </div>
 
@@ -248,6 +254,30 @@ const Producao = {
     const projs = (Store.get('projects') || []).filter(p => !emp || p.empresa === emp);
     sel.innerHTML = '<option value="">Selecione...</option>' +
       buildOptions(projs, 'nome', 'nome', selected);
+    this._fillArtes();
+  },
+
+  /* preenche o select de ARTES conforme o projeto escolhido.
+     As artes pertencem ao projeto; só aparecem quando há projeto. */
+  _fillArtes(selectedArtId = '') {
+    const sel = document.getElementById('prodArte');
+    if (!sel) return;
+    const projNome = document.getElementById('prodProjeto').value;
+    const empNome  = document.getElementById('prodEmpresa').value;
+
+    // acha o projeto (por nome + empresa) para obter o id
+    const proj = (Store.get('projects') || []).find(p =>
+      p.nome === projNome && (!empNome || p.empresa === empNome));
+
+    if (!proj) { sel.innerHTML = '<option value="">— nenhuma —</option>'; return; }
+
+    const arts = Store.get('project_arts').filter(a => a.project_id === proj.id);
+    sel.innerHTML = '<option value="">— nenhuma —</option>' +
+      arts.map(a => {
+        const falta = Math.max(0, (a.meta||0) - (a.feito||0));
+        const sel2 = a.id === selectedArtId ? 'selected' : '';
+        return `<option value="${a.id}" ${sel2}>${a.nome} (${a.feito||0}/${a.meta||0}${falta?`, faltam ${falta}`:', ✓'})</option>`;
+      }).join('');
   },
 
   /* atualiza o preview de consumo em tempo real */
@@ -291,6 +321,7 @@ const Producao = {
     document.getElementById('prodData').value      = p.data      || today();
     document.getElementById('prodEmpresa').value   = p.empresa   || '';
     this._fillProjetos(p.projeto || '');
+    this._fillArtes(p.art_id || '');
     document.getElementById('prodCategoria').value = p.categoria || CATEGORIAS[0];
     document.getElementById('prodQtd').value        = p.quantidade ?? '';
     document.getElementById('prodOperador').value   = p.operador  || '';
@@ -318,6 +349,7 @@ const Producao = {
       data,
       empresa:    document.getElementById('prodEmpresa').value,
       projeto:    document.getElementById('prodProjeto').value,
+      art_id:     document.getElementById('prodArte').value || null,
       categoria:  cat,
       quantidade: qtd,
       pvc:        document.getElementById('prodPvc').value,
@@ -330,21 +362,137 @@ const Producao = {
       chips:      calcChips(freq, qtd)
     };
 
+    // Em EDIÇÃO: efetiva direto (não reprocessa estoque nem crédito).
+    if (this._editId) {
+      reg.id = this._editId;
+      try { await Store.update('productions', reg); }
+      catch { return toast('Erro ao salvar no banco de dados', 'danger'); }
+      bootstrap.Modal.getInstance(document.getElementById('prodModal')).hide();
+      toast('Produção atualizada!');
+      this._editId = null;
+      this._renderRows();
+      App._checkAlerts();
+      return;
+    }
+
+    // NOVO lançamento: monta resumo de consumo e pede confirmação.
+    this._confirmar(reg);
+  },
+
+  /* monta o resumo (estoque + crédito) e abre a confirmação */
+  _confirmar(reg) {
+    // consumo de estoque
+    const consumo = [];
+    if (reg.pvc && reg.folhasPVC > 0)      consumo.push([reg.pvc, reg.folhasPVC, 'folhas']);
+    if (reg.overlay && reg.folhasPVC > 0)  consumo.push(['Overlay', reg.folhasPVC, 'folhas']);
+    if (reg.frequencia === 'Mifare')       consumo.push(['Chip Mifare', reg.chips, 'un']);
+    if (reg.frequencia === '125Khz')       consumo.push(['Chip 125Khz', reg.chips, 'un']);
+    const folhasChip = calcFolhasChip(reg.frequencia, reg.quantidade);
+    if (folhasChip > 0)                    consumo.push(['Folha de Chip', folhasChip, 'folhas']);
+    const cordoes = ['Cordão 12mm','Cordão 15mm','Cordão 20mm','Cordão 25mm'];
+    if (cordoes.includes(reg.categoria))   consumo.push([reg.categoria, reg.quantidade, 'un']);
+
+    // crédito da empresa — SOMENTE se a empresa estiver marcada como "usa crédito"
+    let credInfo = '';
+    const empObj = (Store.get('companies') || []).find(c => c.nome === reg.empresa);
+    const usaCredito = empObj && empObj.usa_credito;
+    if (reg.empresa && usaCredito && typeof Creditos !== 'undefined') {
+      const saldoAtual = Creditos.saldo(reg.empresa);
+      const aposSaldo  = saldoAtual - reg.quantidade;
+      const negativo   = aposSaldo < 0;
+      credInfo = `
+        <div class="mt-3 pt-2 border-top">
+          <div class="fw-semibold mb-1">Crédito — ${reg.empresa}</div>
+          <div class="d-flex justify-content-between">
+            <span class="text-secondary">Saldo atual</span>
+            <span style="font-family:'DM Mono',monospace">${fmtNum(saldoAtual)}</span>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span class="text-secondary">Esta produção</span>
+            <span style="font-family:'DM Mono',monospace" class="text-danger">- ${fmtNum(reg.quantidade)}</span>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span class="fw-semibold">Saldo após</span>
+            <span style="font-family:'DM Mono',monospace" class="fw-semibold ${negativo?'text-danger':'text-success'}">${fmtNum(aposSaldo)}</span>
+          </div>
+          ${negativo ? '<div class="text-danger mt-1" style="font-size:13px"><i class="bi bi-exclamation-triangle me-1"></i>Saldo ficará negativo — a produção será registrada mesmo assim.</div>' : ''}
+        </div>`;
+    }
+
+    const linhasEstoque = consumo.length
+      ? consumo.map(([nome,q,un]) => `
+          <div class="d-flex justify-content-between">
+            <span class="text-secondary">${nome}</span>
+            <span style="font-family:'DM Mono',monospace">${fmtNum(q)} ${un}</span>
+          </div>`).join('')
+      : '<div class="text-secondary" style="font-size:13px">Nenhum material de estoque consumido.</div>';
+
+    // injeta um modal de confirmação dedicado (uma vez)
+    let m = document.getElementById('prodConfirmModal');
+    if (!m) {
+      document.body.insertAdjacentHTML('beforeend', `
+        <div class="modal fade" id="prodConfirmModal" tabindex="-1">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">Confirmar Produção</h5>
+                <button class="btn-close" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body" id="prodConfirmBody"></div>
+              <div class="modal-footer">
+                <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button class="btn btn-primary" id="prodConfirmBtn">
+                  <i class="bi bi-check-lg me-1"></i>Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>`);
+      m = document.getElementById('prodConfirmModal');
+    }
+
+    document.getElementById('prodConfirmBody').innerHTML = `
+      <div class="mb-2">
+        <strong>${fmtNum(reg.quantidade)}</strong> × ${reg.categoria}
+        ${reg.empresa ? ' · '+reg.empresa : ''}${reg.projeto ? ' · '+reg.projeto : ''}
+      </div>
+      <div class="fw-semibold mb-1">Consumo de estoque</div>
+      ${linhasEstoque}
+      ${credInfo}`;
+
+    const confirmModal = new bootstrap.Modal(m);
+    // (re)liga o botão confirmar a este reg específico
+    const btn = document.getElementById('prodConfirmBtn');
+    btn.onclick = () => { confirmModal.hide(); this._efetivar(reg); };
+    confirmModal.show();
+  },
+
+  /* grava a produção, baixa estoque, registra saída de crédito e abate na arte */
+  async _efetivar(reg) {
     try {
-      if (this._editId) {
-        reg.id = this._editId;
-        await Store.update('productions', reg);
-        // Em edição NÃO reprocessamos estoque (evita dupla baixa).
-      } else {
-        await Store.insert('productions', reg);
-        await deductStock(reg);   // baixa de estoque só em novo lançamento
+      const saved = await Store.insert('productions', reg);
+      await deductStock(reg);
+      // saída de crédito — SOMENTE se a empresa usa crédito
+      const empObj = (Store.get('companies') || []).find(c => c.nome === reg.empresa);
+      if (reg.empresa && empObj && empObj.usa_credito && typeof Creditos !== 'undefined') {
+        await Creditos.registrarSaida(reg.empresa, reg.quantidade,
+          `Produção ${reg.categoria}${reg.projeto ? ' — '+reg.projeto : ''}`);
+      }
+      // abate na arte escolhida (se houver): soma ao 'feito'
+      if (reg.art_id) {
+        const arte = Store.get('project_arts').find(a => a.id === reg.art_id);
+        if (arte) {
+          await Store.update('project_arts', {
+            id: arte.id, feito: (arte.feito || 0) + reg.quantidade
+          });
+        }
       }
     } catch {
       return toast('Erro ao salvar no banco de dados', 'danger');
     }
 
-    bootstrap.Modal.getInstance(document.getElementById('prodModal')).hide();
-    toast(this._editId ? 'Produção atualizada!' : 'Produção registrada!');
+    bootstrap.Modal.getInstance(document.getElementById('prodModal'))?.hide();
+    toast('Produção registrada!');
     this._editId = null;
     this._renderRows();
     App._checkAlerts();
@@ -352,8 +500,20 @@ const Producao = {
 
   delete(id) {
     confirm('Deseja excluir este registro de produção?', async () => {
-      try { await Store.remove('productions', id); }
-      catch { return toast('Erro ao excluir', 'danger'); }
+      // antes de remover, recupera a produção para saber se abateu arte
+      const prod = this.load().find(x => x.id === id);
+      try {
+        await Store.remove('productions', id);
+        // se abateu uma arte, desconta de volta (sem deixar negativo)
+        if (prod && prod.art_id) {
+          const arte = Store.get('project_arts').find(a => a.id === prod.art_id);
+          if (arte) {
+            await Store.update('project_arts', {
+              id: arte.id, feito: Math.max(0, (arte.feito || 0) - (prod.quantidade || 0))
+            });
+          }
+        }
+      } catch { return toast('Erro ao excluir', 'danger'); }
       toast('Produção excluída', 'warning');
       this._renderRows();
     });

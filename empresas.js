@@ -52,7 +52,7 @@ const Empresas = {
             <thead>
               <tr>
                 <th>Empresa</th><th>Contato</th><th>Telefone</th>
-                <th>E-mail</th><th>Observações</th><th class="text-end">Ações</th>
+                <th>E-mail</th><th>Cobrança</th><th class="text-end">Ações</th>
               </tr>
             </thead>
             <tbody id="empBody"></tbody>
@@ -96,8 +96,12 @@ const Empresas = {
         <td>${e.contato || '-'}</td>
         <td>${e.telefone || '-'}</td>
         <td>${e.email || '-'}</td>
-        <td class="text-secondary">${e.obs ? e.obs.slice(0,40) : '-'}</td>
+        <td>${e.usa_credito
+          ? '<span class="badge badge-success">Crédito</span>'
+          : '<span class="badge badge-secondary">Por pedido</span>'}</td>
         <td class="text-end">
+          ${e.usa_credito ? `<button class="btn-icon-act text-success" title="Extrato de Crédito" onclick="Creditos.open('${e.nome.replace(/'/g,"\\'")}')">
+            <i class="bi bi-wallet2"></i></button>` : ''}
           <button class="btn-icon-act text-primary" title="Editar" onclick="Empresas.edit('${e.id}')">
             <i class="bi bi-pencil"></i></button>
           <button class="btn-icon-act text-danger" title="Excluir" onclick="Empresas.delete('${e.id}')">
@@ -138,6 +142,15 @@ const Empresas = {
                 <input type="email" class="form-control" id="empEmail">
               </div>
               <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="empUsaCredito">
+                  <label class="form-check-label" for="empUsaCredito">
+                    Esta empresa usa <strong>crédito</strong> (saldo descontado na produção)
+                  </label>
+                </div>
+                <small class="text-secondary">Desligado = paga por pedido (não desconta crédito).</small>
+              </div>
+              <div class="col-12">
                 <label class="form-label">Observações</label>
                 <textarea class="form-control" id="empObs" rows="2"></textarea>
               </div>
@@ -160,6 +173,7 @@ const Empresas = {
     document.getElementById('empModalTitle').textContent = 'Nova Empresa';
     ['Nome','Contato','Telefone','Email','Obs'].forEach(f =>
       document.getElementById('emp'+f).value = '');
+    document.getElementById('empUsaCredito').checked = false; // padrão: por pedido
     new bootstrap.Modal(document.getElementById('empModal')).show();
   },
 
@@ -174,6 +188,7 @@ const Empresas = {
     document.getElementById('empTelefone').value = e.telefone || '';
     document.getElementById('empEmail').value    = e.email    || '';
     document.getElementById('empObs').value      = e.obs      || '';
+    document.getElementById('empUsaCredito').checked = !!e.usa_credito;
     new bootstrap.Modal(document.getElementById('empModal')).show();
   },
 
@@ -187,6 +202,7 @@ const Empresas = {
       contato:  document.getElementById('empContato').value.trim(),
       telefone: document.getElementById('empTelefone').value.trim(),
       email:    document.getElementById('empEmail').value.trim(),
+      usa_credito: document.getElementById('empUsaCredito').checked,
       obs:      document.getElementById('empObs').value.trim()
     };
 

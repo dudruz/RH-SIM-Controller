@@ -26,7 +26,7 @@ const SUPABASE_KEY = 'sb_publishable_b7cJpK8WyyIHlMvlQfGsZg_KzdYipc5'; // a que 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* tabelas gerenciadas */
-const TABLES = ['companies', 'operators', 'projects', 'materials', 'productions', 'project_arts'];
+const TABLES = ['companies', 'operators', 'projects', 'materials', 'productions', 'project_arts', 'credit_movements'];
 
 /* tradução de campos: front (camelCase) <-> banco (snake_case) */
 const FIELD_MAP = {
