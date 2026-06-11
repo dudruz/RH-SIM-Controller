@@ -169,15 +169,28 @@ const Relatorios = {
     return Object.entries(map).sort((a,b) => b[1]-a[1]);
   },
 
-  /* consumo total de folhas (sempre inteiro, arredondado p/ cima por lançamento) */
+  /* consumo total de folhas no período: lançamentos avulsos + rodadas multilayout */
   _consumo(dados) {
     let pvc = 0, overlay = 0, chips = 0, folhasChip = 0;
     dados.forEach(p => {
-      const f = Math.ceil(p.folhasPVC || 0);   // já vem inteiro, mas garante
-      pvc += f;
-      if (p.overlay) overlay += f;
-      chips += (p.chips || 0);
-      folhasChip += Math.ceil((p.frequencia && p.frequencia!=='Sem Chip') ? (p.quantidade||0)/10 : 0);
+      pvc        += Math.ceil(p.folhasPVC || 0);
+      if (p.overlay && (p.folhasPVC||0) > 0) overlay += calcFolhasOverlay(p.categoria, p.quantidade||0);
+      chips      += (p.chips || 0);
+      if ((p.folhasPVC||0) > 0) folhasChip += calcFolhasChip(p.frequencia, p.quantidade||0, p.categoria);
+    });
+    // soma rodadas multilayout no mesmo recorte de filtros (data/categoria/operador)
+    const ini = document.getElementById('relDtIni')?.value || '';
+    const fim = document.getElementById('relDtFim')?.value || '';
+    const cat = document.getElementById('relCategoria')?.value || '';
+    const opr = document.getElementById('relOperador')?.value || '';
+    (Store.get('production_runs') || []).forEach(r => {
+      if (ini && (r.data||'') < ini) return;
+      if (fim && (r.data||'') > fim) return;
+      if (cat && r.categoria !== cat) return;
+      if (opr && r.operador !== opr) return;
+      pvc        += (r.pvc_folhas || 0);
+      overlay    += (r.overlay_folhas || 0);
+      folhasChip += (r.chip_folhas || 0);
     });
     return { pvc, overlay, chips, folhasChip };
   },

@@ -20,13 +20,13 @@
  * ------------------------------------------------------------------ */
 
 const SUPABASE_URL = 'https://oxipmmaexysfccflvdpp.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_b7cJpK8WyyIHlMvlQfGsZg_KzdYipc5'; // a que você rotacionou
+const SUPABASE_KEY = 'COLE_AQUI_SUA_NOVA_PUBLISHABLE_KEY'; // a que você rotacionou
 
 /* cliente do SDK (variável global `supabase` vem do <script> do CDN) */
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* tabelas gerenciadas */
-const TABLES = ['companies', 'operators', 'projects', 'materials', 'productions', 'project_arts', 'credit_movements'];
+const TABLES = ['companies', 'operators', 'projects', 'materials', 'productions', 'project_arts', 'credit_movements', 'production_runs'];
 
 /* tradução de campos: front (camelCase) <-> banco (snake_case) */
 const FIELD_MAP = {

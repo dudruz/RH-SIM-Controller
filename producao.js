@@ -35,8 +35,11 @@ const Producao = {
         <button class="btn btn-outline-secondary btn-sm" onclick="exportExcel(Producao.load(),'producoes')">
           <i class="bi bi-file-earmark-excel me-1"></i>Exportar
         </button>
+        <button class="btn btn-success btn-sm" onclick="Producao.openRodada()">
+          <i class="bi bi-grid-3x3-gap me-1"></i>Nova Rodada (Multilayout)
+        </button>
         <button class="btn btn-primary btn-sm" onclick="Producao.openForm()">
-          <i class="bi bi-plus-lg me-1"></i>Nova Produção
+          <i class="bi bi-plus-lg me-1"></i>Lançamento Avulso
         </button>
       </div>
     </div>
@@ -517,5 +520,279 @@ const Producao = {
       toast('Produção excluída', 'warning');
       this._renderRows();
     });
+  },
+
+  /* ════════════════ RODADA MULTILAYOUT ════════════════
+     Vários itens (empresas) compartilham a(s) mesma(s) folha(s).
+     As FOLHAS são cobradas pela rodada (kit × nº de rodadas);
+     cada item vira uma produção individual (crédito/arte/chips
+     por item) com folhasPVC=0 para não duplicar folhas. */
+  _runItens: [],
+
+  _rodadaModal() {
+    const empresas   = Store.get('companies') || [];
+    const operadores = (Store.get('operators') || []).filter(o => o.status !== 'Inativo');
+    return `
+    <div class="modal fade" id="runModal" tabindex="-1">
+      <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Nova Rodada — Multilayout</h5>
+            <button class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="row g-3 mb-3">
+              <div class="col-md-3">
+                <label class="form-label">Data *</label>
+                <input type="date" class="form-control form-control-sm" id="runData">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Categoria *</label>
+                <select class="form-select form-select-sm" id="runCategoria" onchange="Producao._runResumo()">
+                  ${buildOptions(CATEGORIAS.filter(c => kitRodada(c).pecas > 0))}
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">PVC</label>
+                <select class="form-select form-select-sm" id="runPvc">
+                  <option value="">N/A</option>${buildOptions(PVC_TYPES)}
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Frequência</label>
+                <select class="form-select form-select-sm" id="runFreq" onchange="Producao._runResumo()">
+                  ${buildOptions(FREQUENCIAS)}
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Operador</label>
+                <select class="form-select form-select-sm" id="runOperador">
+                  <option value="">—</option>${buildOptions(operadores,'nome','nome')}
+                </select>
+              </div>
+            </div>
+
+            <!-- adicionar item -->
+            <div class="card mb-3">
+              <div class="card-body py-2">
+                <div class="row g-2 align-items-end">
+                  <div class="col-md-4">
+                    <label class="form-label" style="font-size:12px">Empresa</label>
+                    <select class="form-select form-select-sm" id="runItEmpresa" onchange="Producao._runFillProj()">
+                      <option value="">Selecione...</option>${buildOptions(empresas,'nome','nome')}
+                    </select>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label" style="font-size:12px">Projeto</label>
+                    <select class="form-select form-select-sm" id="runItProjeto" onchange="Producao._runFillArte()">
+                      <option value="">—</option>
+                    </select>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label" style="font-size:12px">Arte</label>
+                    <select class="form-select form-select-sm" id="runItArte"><option value="">—</option></select>
+                  </div>
+                  <div class="col-md-1">
+                    <label class="form-label" style="font-size:12px">Qtd</label>
+                    <input type="number" min="1" class="form-control form-control-sm" id="runItQtd">
+                  </div>
+                  <div class="col-md-1">
+                    <button class="btn btn-primary btn-sm w-100" onclick="Producao.runAddItem()">
+                      <i class="bi bi-plus-lg"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- itens da rodada -->
+            <div id="runItensList"></div>
+
+            <!-- ocupação / consumo -->
+            <div class="calc-preview mt-3">
+              <div class="calc-preview-title">Ocupação e Consumo</div>
+              <div id="runResumo" class="mt-1" style="font-size:13px"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button class="btn btn-success" onclick="Producao.runSalvar()">
+              <i class="bi bi-check-lg me-1"></i>Confirmar Rodada
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  },
+
+  openRodada() {
+    if (!document.getElementById('runModal')) {
+      document.body.insertAdjacentHTML('beforeend', this._rodadaModal());
+    }
+    this._runItens = [];
+    document.getElementById('runData').value = today();
+    document.getElementById('runCategoria').value = 'Crachá';
+    document.getElementById('runPvc').value = '';
+    document.getElementById('runFreq').value = FREQUENCIAS[0];
+    document.getElementById('runOperador').value = '';
+    document.getElementById('runItQtd').value = '';
+    this._runFillProj();
+    this._runRenderItens();
+    this._runResumo();
+    new bootstrap.Modal(document.getElementById('runModal')).show();
+  },
+
+  _runFillProj() {
+    const emp = document.getElementById('runItEmpresa').value;
+    const sel = document.getElementById('runItProjeto');
+    const projs = (Store.get('projects') || []).filter(p => !emp || p.empresa === emp);
+    sel.innerHTML = '<option value="">—</option>' + buildOptions(projs,'nome','nome');
+    this._runFillArte();
+  },
+
+  _runFillArte() {
+    const sel = document.getElementById('runItArte');
+    const projNome = document.getElementById('runItProjeto').value;
+    const emp = document.getElementById('runItEmpresa').value;
+    const proj = (Store.get('projects') || []).find(p => p.nome === projNome && (!emp || p.empresa === emp));
+    if (!proj) { sel.innerHTML = '<option value="">—</option>'; return; }
+    const arts = Store.get('project_arts').filter(a => a.project_id === proj.id);
+    sel.innerHTML = '<option value="">—</option>' +
+      arts.map(a => `<option value="${a.id}">${a.nome} (${a.feito||0}/${a.meta||0})</option>`).join('');
+  },
+
+  runAddItem() {
+    const empresa = document.getElementById('runItEmpresa').value;
+    const qtd = parseInt(document.getElementById('runItQtd').value) || 0;
+    if (!empresa) return toast('Selecione a empresa do item', 'warning');
+    if (qtd <= 0) return toast('Informe a quantidade do item', 'warning');
+
+    this._runItens.push({
+      empresa,
+      projeto: document.getElementById('runItProjeto').value,
+      art_id:  document.getElementById('runItArte').value || null,
+      quantidade: qtd
+    });
+    document.getElementById('runItQtd').value = '';
+    this._runRenderItens();
+    this._runResumo();
+  },
+
+  runDelItem(i) {
+    this._runItens.splice(i, 1);
+    this._runRenderItens();
+    this._runResumo();
+  },
+
+  _runRenderItens() {
+    const wrap = document.getElementById('runItensList');
+    if (!wrap) return;
+    if (!this._runItens.length) {
+      wrap.innerHTML = '<div class="text-secondary" style="font-size:13px">Nenhum item. Adicione as empresas e quantidades que vão na folha.</div>';
+      return;
+    }
+    wrap.innerHTML = `
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Empresa</th><th>Projeto</th><th class="text-end">Qtd</th><th></th></tr></thead>
+        <tbody>${this._runItens.map((it,i) => `
+          <tr>
+            <td>${it.empresa}</td>
+            <td class="text-secondary">${it.projeto || '—'}</td>
+            <td class="text-end" style="font-family:'DM Mono',monospace">${fmtNum(it.quantidade)}</td>
+            <td class="text-end"><button class="btn-icon-act text-danger" onclick="Producao.runDelItem(${i})"><i class="bi bi-x-lg"></i></button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  },
+
+  /* calcula ocupação/folhas da rodada a partir dos itens */
+  _runCalc() {
+    const cat  = document.getElementById('runCategoria')?.value || 'Crachá';
+    const freq = document.getElementById('runFreq')?.value || 'Sem Chip';
+    const kit  = kitRodada(cat);
+    const total = this._runItens.reduce((s,it) => s + it.quantidade, 0);
+    const rodadas = kit.pecas ? Math.ceil(total / kit.pecas) : 0;
+    return {
+      cat, freq, kit, total, rodadas,
+      pvcF: rodadas * kit.pvc,
+      ovlF: rodadas * kit.overlay,
+      chipF: (freq !== 'Sem Chip') ? rodadas * (kit.chipFolha||0) : 0,
+      vagas: rodadas * kit.pecas - total
+    };
+  },
+
+  _runResumo() {
+    const el = document.getElementById('runResumo');
+    if (!el) return;
+    const c = this._runCalc();
+    if (!c.total) { el.innerHTML = '<span class="text-secondary">Adicione itens para ver o consumo.</span>'; return; }
+    el.innerHTML = `
+      <div class="d-flex flex-wrap gap-3">
+        <span><strong>${fmtNum(c.total)}</strong> peças · <strong>${c.rodadas}</strong> rodada${c.rodadas>1?'s':''}
+          ${c.vagas>0 ? `<span class="text-warning">(${c.vagas} vaga${c.vagas>1?'s':''} na folha)</span>` : '<span class="text-success">(folha fechada ✓)</span>'}</span>
+        <span>PVC: <strong>${fmtNum(c.pvcF)}</strong> folhas</span>
+        <span>Overlay: <strong>${fmtNum(c.ovlF)}</strong> folhas</span>
+        ${c.chipF ? `<span>Folha de Chip: <strong>${fmtNum(c.chipF)}</strong></span>` : ''}
+        ${c.freq !== 'Sem Chip' ? `<span>Chips: <strong>${fmtNum(c.total)}</strong> un</span>` : ''}
+      </div>`;
+  },
+
+  async runSalvar() {
+    if (!this._runItens.length) return toast('Adicione ao menos um item à rodada', 'warning');
+    const data = document.getElementById('runData').value;
+    if (!data) return toast('Informe a data', 'warning');
+
+    const c = this._runCalc();
+    const pvcTipo = document.getElementById('runPvc').value;
+    const operador = document.getElementById('runOperador').value;
+
+    try {
+      // 1) grava a rodada (carrega as FOLHAS)
+      const run = await Store.insert('production_runs', {
+        data, categoria: c.cat, pvc: pvcTipo, frequencia: c.freq,
+        overlay: true, operador,
+        total_pecas: c.total, rodadas: c.rodadas,
+        pvc_folhas: c.pvcF, overlay_folhas: c.ovlF, chip_folhas: c.chipF
+      });
+
+      // 2) baixa as folhas UMA vez, pela rodada
+      await deductStockRodada(run);
+
+      // 3) cada item vira uma produção (folhasPVC=0; chips por peça)
+      for (const it of this._runItens) {
+        const reg = {
+          data, empresa: it.empresa, projeto: it.projeto, art_id: it.art_id,
+          categoria: c.cat, quantidade: it.quantidade,
+          pvc: pvcTipo, frequencia: c.freq, overlay: true,
+          operador, obs: 'Rodada multilayout',
+          folhasPVC: 0,                       // folhas já cobradas pela rodada
+          chips: calcChips(c.freq, it.quantidade),
+          run_id: run.id
+        };
+        await Store.insert('productions', reg);
+        await deductStock(reg);               // baixa só chips avulsos/cordões
+
+        // crédito: só empresas que usam crédito
+        const empObj = (Store.get('companies') || []).find(x => x.nome === it.empresa);
+        if (empObj && empObj.usa_credito && typeof Creditos !== 'undefined') {
+          await Creditos.registrarSaida(it.empresa, it.quantidade,
+            `Produção ${c.cat} (rodada)${it.projeto ? ' — '+it.projeto : ''}`);
+        }
+        // arte
+        if (it.art_id) {
+          const arte = Store.get('project_arts').find(a => a.id === it.art_id);
+          if (arte) await Store.update('project_arts', { id: arte.id, feito: (arte.feito||0) + it.quantidade });
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      return toast('Erro ao salvar a rodada', 'danger');
+    }
+
+    bootstrap.Modal.getInstance(document.getElementById('runModal'))?.hide();
+    toast(`Rodada registrada: ${fmtNum(c.total)} peças, ${c.rodadas} rodada(s)`);
+    this._runItens = [];
+    this._renderRows();
+    App._checkAlerts();
   }
 };

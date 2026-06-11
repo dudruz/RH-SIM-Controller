@@ -127,6 +127,7 @@ const Dashboard = {
 
     const sum    = arr => arr.reduce((s,p) => s + (p.quantidade||0), 0);
     const sumPVC = arr => arr.reduce((s,p) => s + Math.ceil(p.folhasPVC||0), 0);
+    const runsMes = (Store.get('production_runs')||[]).filter(r => (r.data||'').startsWith(mon));
 
     const todayP = sum(prods.filter(p => p.data === todayStr));
     const weekP  = sum(prods.filter(p => p.data && new Date(p.data+'T00:00:00') >= ws));
@@ -135,8 +136,11 @@ const Dashboard = {
     const empAtend = new Set(prods.map(p => p.empresa).filter(Boolean)).size;
     const projAtiv = (Store.get('projects')  || []).filter(p => !['Finalizado','Entregue'].includes(p.status)).length;
     const opAtiv   = (Store.get('operators') || []).filter(o => o.status === 'Ativo').length;
-    const pvcMes   = sumPVC(prods.filter(p => (p.data||'').startsWith(mon)));
-    const ovlMes   = sumPVC(prods.filter(p => (p.data||'').startsWith(mon) && p.overlay));
+    const pvcMes   = sumPVC(prods.filter(p => (p.data||'').startsWith(mon)))
+                   + runsMes.reduce((s,r) => s + (r.pvc_folhas||0), 0);
+    const ovlMes   = prods.filter(p => (p.data||'').startsWith(mon) && p.overlay && (p.folhasPVC||0)>0)
+                       .reduce((s,p) => s + calcFolhasOverlay(p.categoria, p.quantidade||0), 0)
+                   + runsMes.reduce((s,r) => s + (r.overlay_folhas||0), 0);
 
     const kpis = [
       { label:'Produção Hoje',      val: fmtNum(todayP),  icon:'calendar-day',   color:'primary', sub:'unidades'   },
@@ -226,12 +230,19 @@ const Dashboard = {
 
       doMes.forEach(p => {
         const folhas = Math.ceil(p.folhasPVC || 0);
-        if (p.pvc) add(p.pvc, folhas);
-        if (p.overlay) add('Overlay', folhas);
-        if (p.frequencia === 'Mifare') { add('Chip Mifare', p.chips||0); add('Folha de Chip', Math.ceil((p.quantidade||0)/10)); }
-        if (p.frequencia === '125Khz') { add('Chip 125Khz', p.chips||0); add('Folha de Chip', Math.ceil((p.quantidade||0)/10)); }
+        if (p.pvc && folhas > 0) add(p.pvc, folhas);
+        if (p.overlay && folhas > 0) add('Overlay', calcFolhasOverlay(p.categoria, p.quantidade||0));
+        if (p.frequencia === 'Mifare') { add('Chip Mifare', p.chips||0); if (folhas>0) add('Folha de Chip', calcFolhasChip(p.frequencia, p.quantidade||0, p.categoria)); }
+        if (p.frequencia === '125Khz') { add('Chip 125Khz', p.chips||0); if (folhas>0) add('Folha de Chip', calcFolhasChip(p.frequencia, p.quantidade||0, p.categoria)); }
         const cord = ['Cordão 12mm','Cordão 15mm','Cordão 20mm','Cordão 25mm'];
         if (cord.includes(p.categoria)) add(p.categoria, p.quantidade||0);
+      });
+
+      // soma as rodadas multilayout do mês (folhas cobradas pela rodada)
+      (Store.get('production_runs')||[]).filter(r => (r.data||'').startsWith(mon)).forEach(r => {
+        if (r.pvc) add(r.pvc, r.pvc_folhas||0);
+        add('Overlay', r.overlay_folhas||0);
+        add('Folha de Chip', r.chip_folhas||0);
       });
 
       const itens = Object.entries(consumo).sort((a,b) => b[1]-a[1]);

@@ -111,34 +111,52 @@ function toggleSidebar() {
 /* ============================================================
    BUSINESS LOGIC HELPERS
    ============================================================ */
-/** Quantos itens cabem em UMA folha de PVC, por categoria.
- *  Retorna 0 para categorias que não usam PVC (cordões). */
-function itensPorFolha(categoria) {
+/** KIT por RODADA (folha fechada / multilayout).
+ *  Cada rodada consome um kit FIXO de folhas, completada ou não:
+ *    Crachá:            10 peças/folha · 2 PVC (frente+verso) · 2 overlay
+ *    Credencial Fina:    4 peças/folha · 1 PVC (só frente)    · 2 overlay
+ *    Credencial Grossa:  4 peças/folha · 2 PVC (frente+verso) · 2 overlay
+ *    Cartão RFID/Smart: 10 peças/folha · 2 PVC                · 2 overlay · 1 folha de chip
+ *    Cordões: não usam folhas. */
+function kitRodada(categoria) {
   switch (categoria) {
-    case 'Crachá':            return 5;
-    case 'Credencial Grossa': return 2;
-    case 'Credencial Fina':   return 4;
-    case 'Cartão RFID':       return 5;
-    case 'Smartcard':         return 5;
-    default:                  return 0;   // cordões não usam PVC
+    case 'Crachá':            return { pecas:10, pvc:2, overlay:2, chipFolha:1 };
+    case 'Credencial Fina':   return { pecas:4,  pvc:1, overlay:2, chipFolha:1 };
+    case 'Credencial Grossa': return { pecas:4,  pvc:2, overlay:2, chipFolha:1 };
+    case 'Cartão RFID':       return { pecas:10, pvc:2, overlay:2, chipFolha:1 };
+    case 'Smartcard':         return { pecas:10, pvc:2, overlay:2, chipFolha:1 };
+    default:                  return { pecas:0,  pvc:0, overlay:0, chipFolha:0 }; // cordões
   }
 }
 
-/** Folhas PVC consumidas por categoria.
- *  Arredonda PARA CIMA: como a folha é completada para não imprimir
- *  em branco, qualquer fração consome uma folha inteira.
- *  Ex.: 4 crachás (cabem 5/folha) => ceil(4/5) = 1 folha. */
-function calcFolhasPVC(categoria, qtd) {
-  const porFolha = itensPorFolha(categoria);
-  if (porFolha === 0 || qtd <= 0) return 0;
-  return Math.ceil(qtd / porFolha);
+/** Quantas RODADAS uma quantidade exige (folhas fechadas, arredonda p/ cima) */
+function calcRodadas(categoria, qtd) {
+  const kit = kitRodada(categoria);
+  if (kit.pecas === 0 || qtd <= 0) return 0;
+  return Math.ceil(qtd / kit.pecas);
 }
 
-/** Folhas de CHIP consumidas: 1 folha a cada 10 peças com chip,
- *  arredondando para cima (a folha de chip só é feita fechada). */
-function calcFolhasChip(frequencia, qtd) {
+/** Mantido para compatibilidade: quantos itens cabem em uma folha */
+function itensPorFolha(categoria) {
+  return kitRodada(categoria).pecas;
+}
+
+/** Folhas PVC de um lançamento AVULSO (rodada própria, kit cheio).
+ *  Ex.: 12 crachás = 2 rodadas = 4 folhas PVC. */
+function calcFolhasPVC(categoria, qtd) {
+  return calcRodadas(categoria, qtd) * kitRodada(categoria).pvc;
+}
+
+/** Folhas de OVERLAY de um lançamento avulso (se overlay ligado) */
+function calcFolhasOverlay(categoria, qtd) {
+  return calcRodadas(categoria, qtd) * kitRodada(categoria).overlay;
+}
+
+/** Folhas de CHIP: 1 por rodada quando a produção tem chip */
+function calcFolhasChip(frequencia, qtd, categoria) {
   if (!frequencia || frequencia === 'Sem Chip' || qtd <= 0) return 0;
-  return Math.ceil(qtd / 10);
+  const r = calcRodadas(categoria || 'Crachá', qtd);
+  return r * (kitRodada(categoria || 'Crachá').chipFolha || 0);
 }
 
 /** Chips avulsos utilizados por frequência (1 por peça com chip) */
@@ -162,20 +180,23 @@ async function deductStock(prod) {
     }
   };
 
-  // PVC
+  // PVC (folhas calculadas pelo kit da rodada; 0 para itens de rodada multilayout)
   if (prod.pvc && prod.folhasPVC > 0) deduct(prod.pvc, prod.folhasPVC);
 
-  // Overlay (mesma quantidade de folhas PVC)
-  if (prod.overlay && prod.folhasPVC > 0) deduct('Overlay', prod.folhasPVC);
+  // Overlay: kit por rodada (ex.: crachá = 2 folhas/rodada), se overlay ligado
+  if (prod.overlay && prod.folhasPVC > 0) {
+    deduct('Overlay', calcFolhasOverlay(prod.categoria, prod.quantidade));
+  }
 
   // Chips avulsos (1 por peça)
   if (prod.frequencia === 'Mifare')  deduct('Chip Mifare', prod.chips);
   if (prod.frequencia === '125Khz')  deduct('Chip 125Khz', prod.chips);
 
-  // Folha de chip (1 a cada 10 peças com chip, arredondado pra cima).
-  // Coexiste com os chips avulsos acima.
-  const folhasChip = calcFolhasChip(prod.frequencia, prod.quantidade);
-  if (folhasChip > 0) deduct('Folha de Chip', folhasChip);
+  // Folha de chip: 1 por rodada quando há chip (e o lançamento carrega folhas)
+  if (prod.folhasPVC > 0) {
+    const folhasChip = calcFolhasChip(prod.frequencia, prod.quantidade, prod.categoria);
+    if (folhasChip > 0) deduct('Folha de Chip', folhasChip);
+  }
 
   // Cordões (1 unidade por peça)
   const cordaoMap = {
@@ -185,6 +206,28 @@ async function deductStock(prod) {
   if (cordaoMap[prod.categoria]) deduct(cordaoMap[prod.categoria], prod.quantidade);
 
   // persiste no banco apenas os materiais que mudaram
+  const rows = mats.filter(m => alterados.has(m.id));
+  if (rows.length) await Store.saveBatch('materials', rows);
+}
+
+/** Baixa de estoque de uma RODADA multilayout (folhas pelo kit, UMA vez).
+ *  Os chips avulsos e cordões são baixados por item (deductStock dos itens
+ *  com folhasPVC=0), então aqui só saem as FOLHAS. */
+async function deductStockRodada(run) {
+  const mats = Store.get('materials');
+  const alterados = new Set();
+  const deduct = (nome, qtd) => {
+    const m = mats.find(x => x.nome === nome);
+    if (m && qtd > 0) {
+      m.estoque = Math.max(0, m.estoque - qtd);
+      Store._patchLocal('materials', m.id, { estoque: m.estoque });
+      alterados.add(m.id);
+    }
+  };
+  if (run.pvc && run.pvc_folhas > 0)  deduct(run.pvc, run.pvc_folhas);
+  if (run.overlay_folhas > 0)         deduct('Overlay', run.overlay_folhas);
+  if (run.chip_folhas > 0)            deduct('Folha de Chip', run.chip_folhas);
+
   const rows = mats.filter(m => alterados.has(m.id));
   if (rows.length) await Store.saveBatch('materials', rows);
 }
