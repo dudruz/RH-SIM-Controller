@@ -32,6 +32,7 @@ const Producao = {
         <p class="page-subtitle">Registro diário de produção</p>
       </div>
       <div class="page-actions">
+        ${App.roleView === 'producao' ? '' : `
         <button class="btn btn-outline-secondary btn-sm" onclick="exportExcel(Producao.load(),'producoes')">
           <i class="bi bi-file-earmark-excel me-1"></i>Exportar
         </button>
@@ -40,9 +41,12 @@ const Producao = {
         </button>
         <button class="btn btn-primary btn-sm" onclick="Producao.openForm()">
           <i class="bi bi-plus-lg me-1"></i>Lançamento Avulso
-        </button>
+        </button>`}
       </div>
     </div>
+
+    <!-- Carteirinhas de estudante prontas (zap para o cliente) -->
+    <div id="zapCarteirinhas"></div>
 
     <!-- Filtros -->
     <div class="filters-bar">
@@ -67,9 +71,9 @@ const Producao = {
             <thead>
               <tr>
                 <th>Data</th><th>Empresa</th><th>Projeto</th><th>Categoria</th>
-                <th class="text-end">Qtd</th><th>PVC</th><th>Freq.</th>
+                <th class="text-end">Qtd</th><th>PVC</th><th>Freq.</th><th>Furo</th>
                 <th class="text-end">Folhas</th><th class="text-end">Chips</th>
-                <th>Overlay</th><th>Operador</th><th class="text-end">Ações</th>
+                <th>Operador</th><th>Etapa</th><th class="text-end">Ações</th>
               </tr>
             </thead>
             <tbody id="prodBody"></tbody>
@@ -112,6 +116,7 @@ const Producao = {
       return;
     }
 
+    const isProd = App.roleView === 'producao';
     body.innerHTML = rows.map(p => `
       <tr>
         <td>${fmtDate(p.data)}</td>
@@ -121,17 +126,84 @@ const Producao = {
         <td class="text-end" style="font-family:'DM Mono',monospace">${fmtNum(p.quantidade)}</td>
         <td>${p.pvc || '-'}</td>
         <td>${p.frequencia || '-'}</td>
-        <td class="text-end" style="font-family:'DM Mono',monospace">${fmtDec(p.folhasPVC)}</td>
+        <td>${p.furo || '-'}</td>
+        <td class="text-end" style="font-family:'DM Mono',monospace">${fmtNum(Math.ceil(p.folhasPVC||0))}</td>
         <td class="text-end" style="font-family:'DM Mono',monospace">${fmtNum(p.chips)}</td>
-        <td>${p.overlay ? '<span class="badge badge-success">Sim</span>' : '<span class="badge badge-secondary">Não</span>'}</td>
         <td>${p.operador || '-'}</td>
+        <td>${this._etapaCell(p)}</td>
         <td class="text-end">
+          ${isProd ? '' : `
           <button class="btn-icon-act text-primary" title="Editar" onclick="Producao.edit('${p.id}')">
             <i class="bi bi-pencil"></i></button>
           <button class="btn-icon-act text-danger" title="Excluir" onclick="Producao.delete('${p.id}')">
-            <i class="bi bi-trash3"></i></button>
+            <i class="bi bi-trash3"></i></button>`}
         </td>
       </tr>`).join('');
+
+    this._renderZap();
+  },
+
+  /* ── Etapas do fluxo físico ───────────────────────────────── */
+  ETAPAS: ['Pendente','Laminado','Cortado','Pronto'],
+
+  _etapaCell(p) {
+    const et = p.etapa || 'Pendente';
+    const cores = { 'Pendente':'badge-secondary', 'Laminado':'badge-info',
+                    'Cortado':'badge-warning', 'Pronto':'badge-success' };
+    const i = this.ETAPAS.indexOf(et);
+    const proxima = i >= 0 && i < this.ETAPAS.length - 1 ? this.ETAPAS[i+1] : null;
+    return `
+      <span class="badge ${cores[et] || 'badge-secondary'}">${et}</span>
+      ${proxima ? `<button class="btn btn-sm btn-outline-success py-0 px-1 ms-1"
+        title="Marcar como ${proxima}" onclick="Producao.avancarEtapa('${p.id}')">
+        <i class="bi bi-arrow-right"></i> ${proxima}</button>` : ''}`;
+  },
+
+  async avancarEtapa(id) {
+    const p = this.load().find(x => x.id === id);
+    if (!p) return;
+    const i = this.ETAPAS.indexOf(p.etapa || 'Pendente');
+    if (i < 0 || i >= this.ETAPAS.length - 1) return;
+    const nova = this.ETAPAS[i+1];
+    try { await Store.update('productions', { id, etapa: nova }); }
+    catch { return toast('Erro ao atualizar etapa', 'danger'); }
+    toast(`Marcado como ${nova}`);
+    this._renderRows();
+  },
+
+  /* ── Carteirinhas de estudante: zap para o cliente ────────── */
+  CARTEIRINHAS: ['UEN','UJB','UE','UDBRA','UEB'],
+
+  _renderZap() {
+    const wrap = document.getElementById('zapCarteirinhas');
+    if (!wrap) return;
+    const prods = this.load();
+    const empresas = Store.get('companies') || [];
+
+    const prontas = this.CARTEIRINHAS.filter(sigla => {
+      // empresas cujo nome contém a sigla (ex.: "UEN" casa "UEN")
+      const lanc = prods.filter(p => (p.empresa||'').toUpperCase().trim() === sigla);
+      return lanc.length > 0 && lanc.every(p => (p.etapa||'Pendente') === 'Pronto');
+    });
+
+    if (!prontas.length) { wrap.innerHTML = ''; return; }
+
+    wrap.innerHTML = `
+      <div class="card mb-3" style="border-color:var(--success)">
+        <div class="card-body py-2 d-flex flex-wrap align-items-center gap-2">
+          <span class="fw-semibold text-success"><i class="bi bi-check-circle-fill me-1"></i>Carteirinhas prontas:</span>
+          ${prontas.map(sigla => {
+            const emp = empresas.find(e => (e.nome||'').toUpperCase().trim() === sigla);
+            const tel = (emp?.telefone || '').replace(/\D/g,'');
+            const fone = tel ? (tel.startsWith('55') ? tel : '55'+tel) : '';
+            return fone
+              ? `<a class="btn btn-sm btn-success" target="_blank"
+                   href="https://wa.me/${fone}?text=${encodeURIComponent('Carteirinhas prontas!')}">
+                   <i class="bi bi-whatsapp me-1"></i>${sigla}</a>`
+              : `<span class="badge badge-warning" title="Sem telefone no cadastro">${sigla} (sem telefone)</span>`;
+          }).join('')}
+        </div>
+      </div>`;
   },
 
   search() { this._renderRows(); },
@@ -209,6 +281,14 @@ const Producao = {
                 <select class="form-select" id="prodOverlay">
                   <option value="nao">Não</option>
                   <option value="sim">Sim</option>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Furo</label>
+                <select class="form-select" id="prodFuro">
+                  <option value="">Sem furo</option>
+                  <option value="Ovoide">Ovoide</option>
+                  <option value="2 Mosquetes">2 Mosquetes</option>
                 </select>
               </div>
 
@@ -310,6 +390,7 @@ const Producao = {
     document.getElementById('prodPvc').value        = '';
     document.getElementById('prodFreq').value       = FREQUENCIAS[0];
     document.getElementById('prodOverlay').value    = 'nao';
+    document.getElementById('prodFuro').value       = '';
     document.getElementById('prodObs').value        = '';
     this._fillProjetos();
     this._preview();
@@ -331,6 +412,7 @@ const Producao = {
     document.getElementById('prodPvc').value        = p.pvc       || '';
     document.getElementById('prodFreq').value       = p.frequencia|| FREQUENCIAS[0];
     document.getElementById('prodOverlay').value    = p.overlay ? 'sim' : 'nao';
+    document.getElementById('prodFuro').value       = p.furo      || '';
     document.getElementById('prodObs').value        = p.obs       || '';
     this._preview();
     new bootstrap.Modal(document.getElementById('prodModal')).show();
@@ -360,6 +442,8 @@ const Producao = {
       overlay:    overlayOn,
       operador:   document.getElementById('prodOperador').value,
       obs:        document.getElementById('prodObs').value.trim(),
+      furo:       document.getElementById('prodFuro').value || null,
+      etapa:      'Pendente',
       /* campos derivados (folhasPVC vira folhas_pvc no banco via FIELD_MAP) */
       folhasPVC,
       chips:      calcChips(freq, qtd)
@@ -570,6 +654,14 @@ const Producao = {
                   <option value="">—</option>${buildOptions(operadores,'nome','nome')}
                 </select>
               </div>
+              <div class="col-md-2">
+                <label class="form-label">Furo</label>
+                <select class="form-select form-select-sm" id="runFuro">
+                  <option value="">Sem furo</option>
+                  <option value="Ovoide">Ovoide</option>
+                  <option value="2 Mosquetes">2 Mosquetes</option>
+                </select>
+              </div>
             </div>
 
             <!-- adicionar item -->
@@ -635,6 +727,7 @@ const Producao = {
     document.getElementById('runPvc').value = '';
     document.getElementById('runFreq').value = FREQUENCIAS[0];
     document.getElementById('runOperador').value = '';
+    document.getElementById('runFuro').value = '';
     document.getElementById('runItQtd').value = '';
     this._runFillProj();
     this._runRenderItens();
@@ -765,6 +858,8 @@ const Producao = {
           categoria: c.cat, quantidade: it.quantidade,
           pvc: pvcTipo, frequencia: c.freq, overlay: true,
           operador, obs: 'Rodada multilayout',
+          furo: document.getElementById('runFuro').value || null,
+          etapa: 'Pendente',
           folhasPVC: 0,                       // folhas já cobradas pela rodada
           chips: calcChips(c.freq, it.quantidade),
           run_id: run.id

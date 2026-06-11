@@ -29,10 +29,25 @@ const Auth = {
   },
 
   /* inicia o sistema (esconde login, mostra layout, roda App.init) */
-  _startApp() {
+  async _startApp() {
     const overlay = document.getElementById('loginOverlay');
     if (overlay) overlay.remove();
     document.body.classList.remove('login-mode');
+
+    // descobre o papel do usuário logado (tabela profiles).
+    // Sem perfil cadastrado => 'admin' (para o dono não se trancar fora).
+    try {
+      const { data: sess } = await sb.auth.getSession();
+      const uid = sess?.session?.user?.id;
+      let role = 'admin';
+      if (uid) {
+        const { data: prof } = await sb.from('profiles').select('role,nome').eq('id', uid).maybeSingle();
+        if (prof && prof.role) role = prof.role;
+      }
+      App.role = role;        // papel real da conta
+      App.roleView = role;    // papel em exibição (o simulador altera só este)
+    } catch { App.role = 'admin'; App.roleView = 'admin'; }
+
     App.init();
   },
 

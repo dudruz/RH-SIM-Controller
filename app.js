@@ -36,8 +36,50 @@ const App = {
       toast('Não foi possível conectar ao banco de dados.', 'danger');
     }
     this._checkAlerts();
-    navigate('dashboard');
+    this.applyRole();
+    navigate(this.roleView === 'producao' ? 'producoes' : 'dashboard');
     setInterval(() => this._updateDate(), 60000);
+  },
+
+  /* papel da conta (definido no login) e papel em exibição (simulador) */
+  role: 'admin',
+  roleView: 'admin',
+
+  /* aplica o papel à interface: produção só vê Produções */
+  applyRole() {
+    const producao = this.roleView === 'producao';
+    document.querySelectorAll('.nav-link-item').forEach(el => {
+      const pg = el.dataset.page;
+      el.style.display = (producao && pg !== 'producoes') ? 'none' : '';
+    });
+    // botões da topbar que produção não usa
+    const alertBtn = document.getElementById('alertBtn');
+    if (alertBtn) alertBtn.style.display = producao ? 'none' : '';
+    this._renderSimulador();
+  },
+
+  /* botão Simular Acesso (apenas para contas admin) no rodapé da sidebar */
+  _renderSimulador() {
+    let btn = document.getElementById('btnSimular');
+    if (this.role !== 'admin') { if (btn) btn.remove(); return; }
+    if (!btn) {
+      const footer = document.querySelector('.sidebar-footer');
+      if (!footer) return;
+      footer.insertAdjacentHTML('afterbegin',
+        `<button id="btnSimular" class="btn btn-sm btn-outline-secondary w-100 mb-2" onclick="App.toggleSimulacao()"></button>`);
+      btn = document.getElementById('btnSimular');
+    }
+    btn.innerHTML = this.roleView === 'producao'
+      ? '<i class="bi bi-arrow-counterclockwise me-1"></i>Voltar a Admin'
+      : '<i class="bi bi-eye me-1"></i>Simular Produção';
+  },
+
+  /* alterna a visão entre admin e produção (não troca a conta) */
+  toggleSimulacao() {
+    this.roleView = this.roleView === 'producao' ? 'admin' : 'producao';
+    this.applyRole();
+    navigate(this.roleView === 'producao' ? 'producoes' : 'dashboard');
+    toast(this.roleView === 'producao' ? 'Visualizando como Produção' : 'De volta como Admin');
   },
 
   /* O seed inicial de materiais agora é feito UMA vez via SQL no Supabase
@@ -67,6 +109,9 @@ const App = {
    ROUTER
    ============================================================ */
 function navigate(page) {
+  // papel produção: só a tela de Produções
+  if (App.roleView === 'producao' && page !== 'producoes') page = 'producoes';
+
   // Destroy old charts
   App.destroyCharts();
 
