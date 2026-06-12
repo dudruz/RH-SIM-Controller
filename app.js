@@ -108,6 +108,17 @@ const App = {
 /* ============================================================
    ROUTER
    ============================================================ */
+/** Registra uma atividade no log (best-effort: nunca quebra o fluxo).
+ *  Ex.: logAtividade('marcou etapa', 'UDBRA · Crachá · 50 un → Laminado') */
+function logAtividade(acao, detalhe) {
+  try {
+    Store.insert('activity_log', {
+      usuario: App.userName || 'desconhecido',
+      acao, detalhe: detalhe || ''
+    }).catch(() => {});
+  } catch (e) { /* log nunca derruba a operação principal */ }
+}
+
 function navigate(page) {
   // papel produção: só a tela de Produções
   if (App.roleView === 'producao' && page !== 'producoes') page = 'producoes';
@@ -140,6 +151,7 @@ function navigate(page) {
     case 'operadores':    content.innerHTML = Operadores.render();   Operadores.init();   break;
     case 'relatorios':    content.innerHTML = Relatorios.render();   Relatorios.init();   break;
     case 'backup':        content.innerHTML = renderBackup();        initBackup();        break;
+    case 'atividades':    content.innerHTML = Atividades.render();   Atividades.init();   break;
     case 'configuracoes': content.innerHTML = renderConfig();                             break;
     default:              content.innerHTML = '<div class="p-4 text-muted">Página não encontrada.</div>';
   }

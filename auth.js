@@ -39,14 +39,16 @@ const Auth = {
     try {
       const { data: sess } = await sb.auth.getSession();
       const uid = sess?.session?.user?.id;
-      let role = 'admin';
+      let role = 'admin', nome = sess?.session?.user?.email || 'usuário';
       if (uid) {
         const { data: prof } = await sb.from('profiles').select('role,nome').eq('id', uid).maybeSingle();
         if (prof && prof.role) role = prof.role;
+        if (prof && prof.nome) nome = prof.nome;
       }
       App.role = role;        // papel real da conta
       App.roleView = role;    // papel em exibição (o simulador altera só este)
-    } catch { App.role = 'admin'; App.roleView = 'admin'; }
+      App.userName = nome;    // para o log de atividades
+    } catch { App.role = 'admin'; App.roleView = 'admin'; App.userName = 'usuário'; }
 
     App.init();
   },

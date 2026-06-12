@@ -218,6 +218,7 @@ const Empresas = {
     }
 
     bootstrap.Modal.getInstance(document.getElementById('empModal')).hide();
+    logAtividade(this._editId ? 'editou empresa' : 'cadastrou empresa', reg.nome);
     toast(this._editId ? 'Empresa atualizada!' : 'Empresa cadastrada!');
     this._editId = null;
     this._renderRows();

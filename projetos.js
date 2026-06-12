@@ -307,6 +307,7 @@ const Projetos = {
     }
 
     bootstrap.Modal.getInstance(document.getElementById('projModal')).hide();
+    logAtividade(this._editId ? 'editou projeto' : 'cadastrou projeto', `${reg.nome} (${reg.empresa})`);
     toast(this._editId ? 'Projeto atualizado!' : 'Projeto cadastrado!');
     this._editId = null;
     this._renderRows();
@@ -319,6 +320,7 @@ const Projetos = {
         for (const a of this.artsOf(id)) await Store.remove('project_arts', a.id);
         await Store.remove('projects', id);
       } catch { return toast('Erro ao excluir', 'danger'); }
+      logAtividade('excluiu projeto', id);
       toast('Projeto excluído', 'warning');
       this._renderRows();
     });

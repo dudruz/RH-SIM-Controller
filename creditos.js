@@ -136,6 +136,7 @@ const Creditos = {
       });
     } catch { return toast('Erro ao adicionar crédito', 'danger'); }
     document.getElementById('credAddQtd').value = '';
+    logAtividade('adicionou crédito', `${this._empresaAtual} · +${fmtNum(qtd)}`);
     toast('Crédito adicionado!');
     this._renderExtrato();
   },
@@ -153,6 +154,7 @@ const Creditos = {
     confirm('Excluir este movimento do extrato?', async () => {
       try { await Store.remove('credit_movements', id); }
       catch { return toast('Erro ao excluir', 'danger'); }
+      logAtividade('excluiu movimento de crédito', this._empresaAtual);
       toast('Movimento excluído', 'warning');
       this._renderExtrato();
     });

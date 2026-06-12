@@ -254,6 +254,7 @@ const Materiais = {
     }
 
     bootstrap.Modal.getInstance(document.getElementById('matModal')).hide();
+    logAtividade(this._editId ? 'editou material' : 'cadastrou material', reg.nome);
     toast(this._editId ? 'Material atualizado!' : 'Material cadastrado!');
     this._editId = null;
     App._checkAlerts();
