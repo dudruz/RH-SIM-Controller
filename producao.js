@@ -45,6 +45,9 @@ const Producao = {
       </div>
     </div>
 
+    <!-- Prazos & Entregas (todos veem; admin edita) -->
+    <div id="prazosPanel"></div>
+
     <!-- Carteirinhas de estudante prontas (zap para o cliente) -->
     <div id="zapCarteirinhas"></div>
 
@@ -59,6 +62,11 @@ const Producao = {
       <select class="form-select form-select-sm" id="prodCatFilter" style="max-width:180px" onchange="Producao.search()">
         <option value="">Todas categorias</option>
         ${buildOptions(CATEGORIAS)}
+      </select>
+      <select class="form-select form-select-sm" id="prodEtapaFilter" style="max-width:150px" onchange="Producao.search()">
+        <option value="">Todas etapas</option>
+        <option>Pendente</option><option>Laminado</option><option>Cortado</option>
+        <option>Pronto</option><option>Entregue</option>
       </select>
       <input type="month" class="form-control form-control-sm" id="prodMonthFilter"
              style="max-width:160px" onchange="Producao.search()">
@@ -91,6 +99,7 @@ const Producao = {
   },
 
   init() {
+    this._renderPrazos();
     this._renderRows();
   },
 
@@ -98,6 +107,7 @@ const Producao = {
     const termo = (document.getElementById('prodSearch')?.value || '').toLowerCase();
     const cat   = document.getElementById('prodCatFilter')?.value || '';
     const mes   = document.getElementById('prodMonthFilter')?.value || '';
+    const etapa = document.getElementById('prodEtapaFilter')?.value || '';
 
     const rows = this.load()
       .filter(p => {
@@ -107,7 +117,8 @@ const Producao = {
           (p.operador||'').toLowerCase().includes(termo);
         const okCat   = !cat || p.categoria === cat;
         const okMes   = !mes || (p.data||'').startsWith(mes);
-        return okTexto && okCat && okMes;
+        const okEtapa = !etapa || (p.etapa||'Pendente') === etapa;
+        return okTexto && okCat && okMes && okEtapa;
       })
       .sort((a,b) => (b.data||'').localeCompare(a.data||'')); // mais recentes primeiro
 
@@ -152,14 +163,17 @@ const Producao = {
   },
 
   /* ── Etapas do fluxo físico ───────────────────────────────── */
-  ETAPAS: ['Pendente','Laminado','Cortado','Pronto'],
+  ETAPAS: ['Pendente','Laminado','Cortado','Pronto','Entregue'],
 
   _etapaCell(p) {
     const et = p.etapa || 'Pendente';
     const cores = { 'Pendente':'badge-secondary', 'Laminado':'badge-info',
-                    'Cortado':'badge-warning', 'Pronto':'badge-success' };
+                    'Cortado':'badge-warning', 'Pronto':'badge-success',
+                    'Entregue':'badge-primary' };
     const i = this.ETAPAS.indexOf(et);
-    const proxima = i >= 0 && i < this.ETAPAS.length - 1 ? this.ETAPAS[i+1] : null;
+    let proxima = i >= 0 && i < this.ETAPAS.length - 1 ? this.ETAPAS[i+1] : null;
+    // produção entrega não marca: 'Entregue' é da expedição (admin)
+    if (proxima === 'Entregue' && App.roleView === 'producao') proxima = null;
     return `
       <span class="badge ${cores[et] || 'badge-secondary'}">${et}</span>
       ${proxima ? `<button class="btn btn-sm btn-outline-success py-0 px-1 ms-1"
@@ -175,6 +189,7 @@ const Producao = {
     const nova = this.ETAPAS[i+1];
     try { await Store.update('productions', { id, etapa: nova }); }
     catch { return toast('Erro ao atualizar etapa', 'danger'); }
+    logAtividade('marcou etapa', `${p.empresa||'—'} · ${p.categoria} · ${fmtNum(p.quantidade)} un → ${nova}`);
     toast(`Marcado como ${nova}`);
     this._renderRows();
   },
@@ -191,12 +206,13 @@ const Producao = {
     }
 
     const cores = { 'Pendente':'secondary', 'Laminado':'info',
-                    'Cortado':'warning', 'Pronto':'success' };
+                    'Cortado':'warning', 'Pronto':'success', 'Entregue':'primary' };
 
     wrap.innerHTML = rows.map(p => {
       const et = p.etapa || 'Pendente';
       const i = this.ETAPAS.indexOf(et);
-      const proxima = i >= 0 && i < this.ETAPAS.length - 1 ? this.ETAPAS[i+1] : null;
+      let proxima = i >= 0 && i < this.ETAPAS.length - 1 ? this.ETAPAS[i+1] : null;
+      if (proxima === 'Entregue' && App.roleView === 'producao') proxima = null;
       return `
       <div class="card mb-2 prod-card">
         <div class="card-body py-2 px-3">
@@ -234,9 +250,10 @@ const Producao = {
     const empresas = Store.get('companies') || [];
 
     const prontas = this.CARTEIRINHAS.filter(sigla => {
-      // empresas cujo nome contém a sigla (ex.: "UEN" casa "UEN")
-      const lanc = prods.filter(p => (p.empresa||'').toUpperCase().trim() === sigla);
-      return lanc.length > 0 && lanc.every(p => (p.etapa||'Pendente') === 'Pronto');
+      // só conta o que ainda não foi entregue; faixa aparece quando tudo aberto está Pronto
+      const lanc = prods.filter(p => (p.empresa||'').toUpperCase().trim() === sigla
+                                   && (p.etapa||'Pendente') !== 'Entregue');
+      return lanc.length > 0 && lanc.every(p => p.etapa === 'Pronto');
     });
 
     if (!prontas.length) { wrap.innerHTML = ''; return; }
@@ -249,14 +266,123 @@ const Producao = {
             const emp = empresas.find(e => (e.nome||'').toUpperCase().trim() === sigla);
             const tel = (emp?.telefone || '').replace(/\D/g,'');
             const fone = tel ? (tel.startsWith('55') ? tel : '55'+tel) : '';
-            return fone
+            const zap = fone
               ? `<a class="btn btn-sm btn-success" target="_blank"
                    href="https://wa.me/${fone}?text=${encodeURIComponent('Carteirinhas prontas!')}">
                    <i class="bi bi-whatsapp me-1"></i>${sigla}</a>`
               : `<span class="badge badge-warning" title="Sem telefone no cadastro">${sigla} (sem telefone)</span>`;
+            const entregar = App.roleView === 'producao' ? '' :
+              `<button class="btn btn-sm btn-outline-primary" title="Marcar entregue (some da faixa)"
+                 onclick="Producao.entregarCarteirinhas('${sigla}')">
+                 <i class="bi bi-box-seam me-1"></i>Entregue</button>`;
+            return `<span class="d-inline-flex gap-1">${zap}${entregar}</span>`;
           }).join('')}
         </div>
       </div>`;
+  },
+
+  /* marca todos os lançamentos Prontos da empresa como Entregues */
+  entregarCarteirinhas(sigla) {
+    confirm(`Marcar as carteirinhas de ${sigla} como ENTREGUES?`, async () => {
+      const lanc = this.load().filter(p =>
+        (p.empresa||'').toUpperCase().trim() === sigla && p.etapa === 'Pronto');
+      try {
+        for (const p of lanc) await Store.update('productions', { id: p.id, etapa: 'Entregue' });
+      } catch { return toast('Erro ao marcar entrega', 'danger'); }
+      logAtividade('entregou carteirinhas', `${sigla} · ${lanc.length} lançamento(s)`);
+      toast(`${sigla}: carteirinhas entregues!`);
+      this._renderRows();
+    });
+  },
+
+  /* ── Prazos & Entregas (todos veem; admin edita) ──────────── */
+  _renderPrazos() {
+    const wrap = document.getElementById('prazosPanel');
+    if (!wrap) return;
+    const isAdmin = App.roleView !== 'producao';
+    const prazos = Store.get('prazos') || [];
+    const projetos = (Store.get('projects') || [])
+      .filter(p => p.entrega && !['Finalizado','Entregue'].includes(p.status))
+      .sort((a,b) => (a.entrega||'').localeCompare(b.entrega||''));
+
+    const linhaPrazo = (z) => `
+      <div class="d-flex justify-content-between align-items-center py-1 ${z.entregue?'opacity-50':''}" style="border-bottom:1px dashed var(--border)">
+        <div>
+          <span class="fw-semibold">${z.titulo}</span>
+          ${z.prazo ? `<span class="badge badge-info ms-1">${z.prazo}</span>` : ''}
+          ${z.recorrencia ? `<div class="text-secondary" style="font-size:12px">${z.recorrencia}</div>` : ''}
+          ${z.entregue && z.entregue_em ? `<div class="text-success" style="font-size:12px">✓ entregue em ${fmtDate(z.entregue_em)}</div>` : ''}
+        </div>
+        ${isAdmin ? `
+        <div class="d-flex gap-1">
+          <button class="btn btn-sm ${z.entregue?'btn-outline-secondary':'btn-outline-success'} py-0 px-2"
+                  title="${z.entregue?'Reabrir':'Marcar entregue'}" onclick="Producao.prazoEntregue('${z.id}')">
+            <i class="bi ${z.entregue?'bi-arrow-counterclockwise':'bi-check-lg'}"></i></button>
+          <button class="btn-icon-act text-primary" title="Editar" onclick="Producao.prazoEdit('${z.id}')"><i class="bi bi-pencil"></i></button>
+          <button class="btn-icon-act text-danger" title="Excluir" onclick="Producao.prazoDel('${z.id}')"><i class="bi bi-trash3"></i></button>
+        </div>` : ''}
+      </div>`;
+
+    wrap.innerHTML = `
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span class="card-title"><i class="bi bi-alarm me-2"></i>Prazos & Entregas</span>
+          ${isAdmin ? `<button class="btn btn-sm btn-outline-primary" onclick="Producao.prazoEdit()">
+            <i class="bi bi-plus-lg me-1"></i>Novo prazo</button>` : ''}
+        </div>
+        <div class="card-body py-2">
+          ${prazos.length ? prazos.map(linhaPrazo).join('') :
+            '<div class="text-secondary" style="font-size:13px">Nenhum prazo cadastrado.</div>'}
+          ${projetos.length ? `
+            <div class="fw-semibold mt-2 mb-1" style="font-size:13px"><i class="bi bi-kanban me-1"></i>Projetos em andamento</div>
+            ${projetos.map(p => `
+              <div class="d-flex justify-content-between py-1" style="border-bottom:1px dashed var(--border);font-size:13px">
+                <span>${p.nome} <span class="text-secondary">(${p.empresa||'—'})</span></span>
+                <span class="badge ${(p.entrega < today()) ? 'badge-danger' : 'badge-warning'}">entrega ${fmtDate(p.entrega)}</span>
+              </div>`).join('')}` : ''}
+        </div>
+      </div>`;
+  },
+
+  async prazoEntregue(id) {
+    const z = (Store.get('prazos')||[]).find(x => x.id === id);
+    if (!z) return;
+    const novo = !z.entregue;
+    try {
+      await Store.update('prazos', { id, entregue: novo, entregue_em: novo ? today() : null });
+    } catch { return toast('Erro ao atualizar', 'danger'); }
+    logAtividade(novo ? 'marcou prazo entregue' : 'reabriu prazo', z.titulo);
+    this._renderPrazos();
+  },
+
+  prazoEdit(id) {
+    const z = id ? (Store.get('prazos')||[]).find(x => x.id === id) : null;
+    const titulo = prompt('Título (ex.: Carteirinhas):', z?.titulo || '');
+    if (titulo === null) return;
+    if (!titulo.trim()) return toast('Informe o título', 'warning');
+    const prazo = prompt('Prazo (ex.: 24h, 5 a 7 dias úteis):', z?.prazo || '');
+    if (prazo === null) return;
+    const rec = prompt('Recorrência/observação (ex.: UDBRA: toda segunda e quinta) — vazio se não houver:', z?.recorrencia || '');
+    if (rec === null) return;
+
+    const op = z
+      ? Store.update('prazos', { id: z.id, titulo: titulo.trim(), prazo: prazo.trim(), recorrencia: rec.trim() })
+      : Store.insert('prazos', { titulo: titulo.trim(), prazo: prazo.trim(), recorrencia: rec.trim(), entregue: false });
+    op.then(() => {
+      logAtividade(z ? 'editou prazo' : 'criou prazo', titulo.trim());
+      this._renderPrazos();
+      toast(z ? 'Prazo atualizado!' : 'Prazo criado!');
+    }).catch(() => toast('Erro ao salvar prazo', 'danger'));
+  },
+
+  prazoDel(id) {
+    const z = (Store.get('prazos')||[]).find(x => x.id === id);
+    confirm(`Excluir o prazo "${z?.titulo||''}"?`, async () => {
+      try { await Store.remove('prazos', id); }
+      catch { return toast('Erro ao excluir', 'danger'); }
+      logAtividade('excluiu prazo', z?.titulo || '');
+      this._renderPrazos();
+    });
   },
 
   search() { this._renderRows(); },
@@ -507,6 +633,7 @@ const Producao = {
       reg.id = this._editId;
       try { await Store.update('productions', reg); }
       catch { return toast('Erro ao salvar no banco de dados', 'danger'); }
+      logAtividade('editou produção', `${reg.empresa||'—'} · ${reg.categoria} · ${fmtNum(reg.quantidade)} un`);
       bootstrap.Modal.getInstance(document.getElementById('prodModal')).hide();
       toast('Produção atualizada!');
       this._editId = null;
@@ -631,6 +758,7 @@ const Producao = {
       return toast('Erro ao salvar no banco de dados', 'danger');
     }
 
+    logAtividade('criou produção', `${reg.empresa||'—'} · ${reg.categoria} · ${fmtNum(reg.quantidade)} un`);
     bootstrap.Modal.getInstance(document.getElementById('prodModal'))?.hide();
     toast('Produção registrada!');
     this._editId = null;
@@ -654,6 +782,7 @@ const Producao = {
           }
         }
       } catch { return toast('Erro ao excluir', 'danger'); }
+      logAtividade('excluiu produção', `${prod?.empresa||'—'} · ${prod?.categoria||''} · ${fmtNum(prod?.quantidade||0)} un`);
       toast('Produção excluída', 'warning');
       this._renderRows();
     });
@@ -937,6 +1066,7 @@ const Producao = {
       return toast('Erro ao salvar a rodada', 'danger');
     }
 
+    logAtividade('registrou rodada', `${c.cat} · ${fmtNum(c.total)} peças (${this._runItens.map(i=>i.empresa+' '+i.quantidade).join(', ')})`);
     bootstrap.Modal.getInstance(document.getElementById('runModal'))?.hide();
     toast(`Rodada registrada: ${fmtNum(c.total)} peças, ${c.rodadas} rodada(s)`);
     this._runItens = [];
