@@ -71,8 +71,9 @@ const Auth = {
         </div>
         <h5 class="login-title">Acesso ao sistema</h5>
         <div class="login-field">
-          <label class="form-label">E-mail</label>
-          <input type="email" class="form-control" id="loginEmail" autocomplete="username">
+          <label class="form-label">Usuário ou e-mail</label>
+          <input type="text" class="form-control" id="loginEmail" autocomplete="username"
+                 placeholder="nome de usuário ou e-mail">
         </div>
         <div class="login-field">
           <label class="form-label">Senha</label>
@@ -99,7 +100,9 @@ const Auth = {
 
   /* tenta autenticar */
   async login() {
-    const email = document.getElementById('loginEmail').value.trim();
+    let email = document.getElementById('loginEmail').value.trim().toLowerCase();
+    // Acesso por NOME (produção): sem "@" vira nome@rhsim.local
+    if (email && !email.includes('@')) email = email + '@rhsim.local';
     const pass  = document.getElementById('loginPass').value;
     const errEl = document.getElementById('loginError');
     const btn   = document.getElementById('loginBtn');
@@ -113,7 +116,7 @@ const Auth = {
     const { error } = await sb.auth.signInWithPassword({ email, password: pass });
 
     if (error) {
-      errEl.textContent = 'E-mail ou senha incorretos.';
+      errEl.textContent = 'Usuário/e-mail ou senha incorretos.';
       btn.disabled = false;
       btn.innerHTML = '<i class="bi bi-box-arrow-in-right me-1"></i>Entrar';
       return;

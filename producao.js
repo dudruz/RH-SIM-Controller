@@ -64,6 +64,10 @@ const Producao = {
              style="max-width:160px" onchange="Producao.search()">
     </div>
 
+    ${App.roleView === 'producao' ? `
+    <!-- Visão PRODUÇÃO: cards grandes, feitos para o celular -->
+    <div id="prodCards"></div>
+    ` : `
     <div class="card">
       <div class="card-body p-0">
         <div class="table-wrap">
@@ -81,6 +85,7 @@ const Producao = {
         </div>
       </div>
     </div>
+    `}
 
     ${this._modal(empresas, operadores)}`;
   },
@@ -105,6 +110,9 @@ const Producao = {
         return okTexto && okCat && okMes;
       })
       .sort((a,b) => (b.data||'').localeCompare(a.data||'')); // mais recentes primeiro
+
+    // Papel produção: cards grandes (feitos para o celular)
+    if (App.roleView === 'producao') { this._renderCards(rows); this._renderZap(); return; }
 
     const body = document.getElementById('prodBody');
     if (!body) return;
@@ -169,6 +177,51 @@ const Producao = {
     catch { return toast('Erro ao atualizar etapa', 'danger'); }
     toast(`Marcado como ${nova}`);
     this._renderRows();
+  },
+
+  /* ── Visão PRODUÇÃO em cards (mobile-first) ───────────────── */
+  _renderCards(rows) {
+    const wrap = document.getElementById('prodCards');
+    if (!wrap) return;
+
+    if (!rows.length) {
+      wrap.innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i>
+        <p>Nenhuma produção encontrada</p></div>`;
+      return;
+    }
+
+    const cores = { 'Pendente':'secondary', 'Laminado':'info',
+                    'Cortado':'warning', 'Pronto':'success' };
+
+    wrap.innerHTML = rows.map(p => {
+      const et = p.etapa || 'Pendente';
+      const i = this.ETAPAS.indexOf(et);
+      const proxima = i >= 0 && i < this.ETAPAS.length - 1 ? this.ETAPAS[i+1] : null;
+      return `
+      <div class="card mb-2 prod-card">
+        <div class="card-body py-2 px-3">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-1">
+            <div>
+              <div class="fw-bold" style="font-size:16px">${p.empresa || '—'}</div>
+              <div class="text-secondary" style="font-size:13px">
+                ${p.categoria} · <strong>${fmtNum(p.quantidade)} un</strong>
+                ${p.furo ? ' · '+p.furo : ''} · ${fmtDate(p.data)}
+                ${p.projeto ? '<br>'+p.projeto : ''}
+              </div>
+            </div>
+            <span class="badge badge-${cores[et]||'secondary'}" style="font-size:13px">${et}</span>
+          </div>
+          ${proxima ? `
+          <button class="btn btn-success w-100 mt-2 py-2" style="font-size:15px"
+                  onclick="Producao.avancarEtapa('${p.id}')">
+            <i class="bi bi-check-lg me-1"></i>Marcar ${proxima}
+          </button>` : `
+          <div class="text-center text-success mt-2 py-1" style="font-size:14px">
+            <i class="bi bi-check-circle-fill me-1"></i>Pronto para expedição
+          </div>`}
+        </div>
+      </div>`;
+    }).join('');
   },
 
   /* ── Carteirinhas de estudante: zap para o cliente ────────── */

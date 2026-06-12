@@ -723,3 +723,38 @@ textarea.form-control { resize: vertical; }
 .kpi-card:nth-child(7) { animation-delay: .21s; }
 .kpi-card:nth-child(8) { animation-delay: .24s; }
 .kpi-card:nth-child(9) { animation-delay: .27s; }
+
+/* ============================================================
+   MOBILE / TOQUE (acesso pelo celular — produção e admin)
+   ============================================================ */
+@media (max-width: 768px) {
+  /* filtros empilham e ocupam a largura toda */
+  .filters-bar { flex-direction: column; align-items: stretch; }
+  .filters-bar > * { max-width: 100% !important; width: 100%; }
+
+  /* cabeçalho da página empilha; botões de ação ocupam a linha */
+  .page-header { flex-direction: column; align-items: stretch; gap: 10px; }
+  .page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .page-actions .btn { flex: 1 1 auto; }
+
+  /* modais quase tela cheia */
+  .modal-dialog { margin: 8px; max-width: calc(100% - 16px); }
+
+  /* área de toque confortável em botões e selects */
+  .btn-sm { padding: 8px 12px; font-size: 14px; }
+  .form-select-sm, .form-control-sm { min-height: 40px; font-size: 15px; }
+  .btn-icon-act { padding: 8px; font-size: 17px; }
+
+  /* cards de produção: tipografia maior */
+  .prod-card .btn { min-height: 46px; }
+}
+
+@media (max-width: 480px) {
+  .page-content { padding: 10px; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .kpi-card { padding: 12px; }
+  .report-stat { padding: 10px; }
+  /* tabelas (admin) roláveis com fonte um pouco menor */
+  .table { font-size: 13px; }
+  .table th, .table td { padding: 8px 6px; white-space: nowrap; }
+}
